@@ -1,13 +1,19 @@
 const std = @import("std");
 
 pub const Data = struct {
+    /// name for display purposes
     name: []const u8,
+    /// total invocations
     i: u64,
+    /// total nanoseconds
     nanos: u64,
+    /// mean (nanos / i)
     mean: f64,
 
     // zig fmt: off
     // keeps on wanting to mash each print call on one long line
+    /// calls std.debug.print and displays in a tabular format
+    /// .header: print newline and then header lines first
     pub fn dprint(s: @This(), header: bool) void {
         if (header) {
             std.debug.print("\n{s: <10} | {s: >12} | {s: >13} | {s: >6}\n",
@@ -99,8 +105,8 @@ pub inline fn blackhole(x: anytype) void {
 /// To prevent the compiler from optimizing a result away even in ReleaseFast.
 /// Sometimes it can be a little easier to use or more efficient if the commpiler
 /// insists on recreating the volatile area.
-/// x: A result value to send into a blackhole
-/// y: a pointer to an already existing location to use
+/// .x: A result value to send into a blackhole
+/// .y: a pointer to an already existing location to use
 pub inline fn blackloc(x: anytype, y: *@TypeOf(x)) void {
     @as(*volatile @TypeOf(x), @ptrCast(y)).* = x;
 }
@@ -108,8 +114,8 @@ pub inline fn blackloc(x: anytype, y: *@TypeOf(x)) void {
 
 /// To prevent the compiler from optimizing out a read from a location. Casts to
 /// volatile and does the read.
-/// X: the type to read
-/// y: the memory location to read from
+/// .X: the type to read
+/// .y: the memory location to read from
 pub inline fn whiteloc(X: type, y: *X) X {
     return @as(*volatile X, @ptrCast(y)).*;
 }
