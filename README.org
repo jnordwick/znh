@@ -28,13 +28,13 @@ of invocations. Planning to add more.
 
 * TODO always more
 - [X] find empty run baseline
-- [ ] per fix time interval
-- [ ] max timed runs
-- [ ] other threads to do the timing calls
+- [X] per fix time interval
+- [X] max timed runs
+- [X] other threads to do the timing calls
 - [ ] better interface
 - [ ] warmup
 - [ ] cache flushing (opposide of warmup)
 - [ ] better reporting
-- [ ] void returning functions
+- [X] void returning functions
 - [ ] functions with no arguments
 - [ ] steal more JMH ideas

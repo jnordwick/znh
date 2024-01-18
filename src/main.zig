@@ -1,4 +1,5 @@
 const std = @import("std");
+const Thread = std.Thread;
 
 const Options = enum(u32) {
     None = 0x00,
@@ -47,11 +48,10 @@ pub const Data = struct {
 /// .invokes: number of times to execute
 /// .func: the function to call
 /// .args: a tuple of the arguments
-pub noinline fn run_single(comptime opt: Options,
-                           name: []const u8,
-                           invokes: u64,
-                           func: anytype,
-                           arg: anytype) Data {
+pub noinline fn run_count_single(
+    comptime opt: Options, name: []const u8, invokes: u64,
+    func: anytype, arg: anytype) Data {
+
     var varg = arg;
     var pvarg: *volatile @TypeOf(varg) = &varg;
     var vvarg = pvarg.*;
@@ -85,6 +85,61 @@ pub noinline fn run_single(comptime opt: Options,
                 .mean = mean };
 }
 
+fn set_bool(flag: *volatile bool, start: *volatile u64, nanos: u64) void {
+    while(start.* == 0) {}
+    const cstart: u64 = start.*;
+    const cend: u64 = cstart + nanos;
+    while(now() < cend) {}
+    flag.* = true;
+}
+
+pub noinline fn run_timed_single(
+    comptime opt: Options, name: []const u8, millis: u64,
+    func: anytype, arg: anytype) Data {
+
+    var varg = arg;
+    var pvarg: *volatile @TypeOf(varg) = &varg;
+    var vvarg = pvarg.*;
+
+    // std.mem.doNotOptimize seems to get optimized away in non-Debug builds
+    // and the never_inline function is then elided
+    const func_ti = @typeInfo(@TypeOf(func));
+    const ret_type = func_ti.Fn.return_type.?;
+    var ret: ret_type = undefined;
+    const pvret: *volatile ret_type = &ret;
+
+    const run_nanos = 1000000 * @max(millis, 15);
+
+    var invokes: u64 = 0;
+    var done: bool = false;
+    var vpdone: *volatile bool = &done;
+    var start: u64 = 0;
+    var vpstart: *volatile u64 = &start;
+    var timer = Thread.spawn(.{}, set_bool, .{vpdone, vpstart, run_nanos}) catch @panic("could not spawn");
+
+    // actual run
+    vpstart.* = now();
+    while (!vpdone.*) {
+        pvret.* = @call(.never_inline, func, vvarg);
+        invokes += 1;
+    }
+    const stop = now();
+
+    // baseline calculation
+    const base = baseline(opt, invokes);
+
+    const delta = stop - start - base;
+    const mean = toDouble(delta) / toDouble(invokes);
+
+    timer.join();
+
+    return Data{ .name = name,
+                .i = invokes,
+                .nanos = delta,
+                .base = base,
+                .mean = mean };
+}
+
 /// bench a function against differents arguments a fixed number of times through
 /// the entire set. This is useful for functioins who's time can vary for different
 /// arguments. Also good for giving the same set of values to diffrent functions.
@@ -92,7 +147,10 @@ pub noinline fn run_single(comptime opt: Options,
 /// .passes: number of times to loop over the arguments
 /// .func: the function to call
 /// .args: a slice of tuples of the arguments
-pub noinline fn run_slice(comptime opt:Options, name: []const u8, passes: u64, comptime func: anytype, args: anytype) Data {
+pub noinline fn run_count_slice(
+    comptime opt:Options, name: []const u8, passes: u64,
+    comptime func: anytype, args: anytype) Data {
+
     const args_type = @TypeOf(args[0]);
     const aargs: [*]volatile args_type = @ptrCast(args.ptr);
     var len = args.len;
@@ -128,7 +186,57 @@ pub noinline fn run_slice(comptime opt:Options, name: []const u8, passes: u64, c
                 .mean = mean };
 }
 
+pub noinline fn run_timed_slice(
+    comptime opt:Options, name: []const u8, millis: u64,
+    comptime func: anytype, args: anytype) Data {
+
+    const args_type = @TypeOf(args[0]);
+    const aargs: [*]volatile args_type = @ptrCast(args.ptr);
+    var len = args.len;
+
+    // std.mem.doNotOptimize seems to get optimized away in non-Debug builds
+    // and the never_inline function is then elided
+    const func_ti = @typeInfo(@TypeOf(func));
+    const ret_type = func_ti.Fn.return_type.?;
+    var ret: ret_type = undefined;
+    const pvret: *volatile ret_type = &ret;
+
+    const run_nanos = 1000000 * @max(millis, 15);
+
+    var invokes: u64 = 0;
+    var done: bool = false;
+    var vpdone: *volatile bool = &done;
+    var start: u64 = 0;
+    var vpstart: *volatile u64 = &start;
+    var timer = Thread.spawn(.{}, set_bool, .{vpdone, vpstart, run_nanos}) catch @panic("could not spawn");
+
+    // actual run
+    vpstart.* = now();
+    while (!vpdone.*) {
+        for (0..len) |i| {
+            pvret.* = @call(.never_inline, func, aargs[i]);
+            invokes += 1;
+        }
+    }
+    const stop = now();
+
+    // baseline calculation
+    const base = baseline(opt, invokes);
+
+    const delta = stop - start - base;
+    const mean = toDouble(delta) / toDouble(invokes);
+
+    timer.join();
+
+    return Data{ .name = name,
+                .i = invokes,
+                .nanos = delta,
+                .base = base,
+                .mean = mean };
+}
+
 /// to prevent the compiler from optimizing a result away even in ReleaseFast.
+/// godbolt confirms Release modes DCE out _ and std.mem.doNotOptimize.
 pub inline fn blackhole(x: anytype) void {
     const ret_type = @TypeOf(x);
     var vret: ret_type = undefined;
@@ -214,33 +322,74 @@ pub fn testervoid(x: u64) void {
     blackhole(x);
 }
 
-test "single" {
+
+test "timer thread" {
+    const millis100 = 100 * 1000 * 1000;
+    var flag: bool = false;
+    var vpf: *volatile bool = &flag;
+    var start: u64 = 0;
+    var vpstart: *volatile u64 = &start;
+    var timer = Thread.spawn(.{}, set_bool, .{vpf, vpstart, millis100}) catch @panic("could not spawn");
+    vpstart.* = now();
+    while(!vpf.*) {}
+    const stop = now();
+    timer.join();
+
+    const tot:f64 = toDouble(stop - start) / 1e6;
+    try std.testing.expectApproxEqAbs(@as(f64, 100.0), tot, 5.0);
+}
+
+test "count single" {
     const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
     const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
     const args32: arg_type32 = .{ 4.0, 9.0 };
     const args64: arg_type64 = .{ 4.0, 9.0 };
 
-    run_single(.None, "tester32", 10000, tester32, args32).dprint(true);
-    run_single(.None, "tester64", 10000, tester64, args64).dprint(false);
-    run_single(.None, "tester32m", 10000, tester32m, args32).dprint(false);
-    run_single(.None, "tester64m", 10000, tester64m, args64).dprint(false);
+    run_count_single(.None, "tester32", 10000, tester32, args32).dprint(true);
+    run_count_single(.None, "tester64", 10000, tester64, args64).dprint(false);
+    run_count_single(.None, "tester32m", 10000, tester32m, args32).dprint(false);
+    run_count_single(.None, "tester64m", 10000, tester64m, args64).dprint(false);
 }
 
-test "slice" {
+test "count slice" {
     const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
     const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
     var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
     var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
 
-    run_slice(.None, "stester32", 10000, tester32, &args32).dprint(true);
-    run_slice(.None, "stester64", 10000, tester64, &args64).dprint(false);
-    run_slice(.None, "stester32m", 10000, tester32m, &args32).dprint(false);
-    run_slice(.None, "stester64m", 10000, tester64m, &args64).dprint(false);
+    run_count_slice(.None, "stester32", 10000, tester32, &args32).dprint(true);
+    run_count_slice(.None, "stester64", 10000, tester64, &args64).dprint(false);
+    run_count_slice(.None, "stester32m", 10000, tester32m, &args32).dprint(false);
+    run_count_slice(.None, "stester64m", 10000, tester64m, &args64).dprint(false);
+}
+
+test "timed single" {
+    const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
+    const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
+    const args32: arg_type32 = .{ 4.0, 9.0 };
+    const args64: arg_type64 = .{ 4.0, 9.0 };
+
+    run_timed_single(.None, "tester32", 100, tester32, args32).dprint(true);
+    run_timed_single(.None, "tester64", 100, tester64, args64).dprint(false);
+    run_timed_single(.None, "tester32m", 100, tester32m, args32).dprint(false);
+    run_timed_single(.None, "tester64m", 100, tester64m, args64).dprint(false);
+}
+
+test "timed slice" {
+    const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
+    const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
+    var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
+    var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
+
+    run_timed_slice(.None, "stester32", 100, tester32, &args32).dprint(true);
+    run_timed_slice(.None, "stester64", 100, tester64, &args64).dprint(false);
+    run_timed_slice(.None, "stester32m", 100, tester32m, &args32).dprint(false);
+    run_timed_slice(.None, "stester64m", 100, tester64m, &args64).dprint(false);
 }
 
 test "void return" {
     const arg_type = std.meta.Tuple(&.{u64});
     var arg = [_]arg_type{ .{now()}, .{now()}, .{now()} };
-    run_single(.None, "void", 1000000, testervoid, .{now()}).dprint(true);
-    run_slice(.None, "svoid",  1000000, testervoid, &arg).dprint(false);
+    run_count_single(.None, "void", 1000000, testervoid, .{now()}).dprint(true);
+    run_count_slice(.None, "svoid",  1000000, testervoid, &arg).dprint(false);
 }
