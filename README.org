@@ -38,3 +38,8 @@ of invocations. Planning to add more.
 - [X] void returning functions
 - [ ] functions with no arguments
 - [ ] steal more JMH ideas
+
+* NOTES
+
+There is still some issues with optimizations creeping into the
+wrong places

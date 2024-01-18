@@ -18,28 +18,32 @@ pub const Data = struct {
     name: []const u8,
     /// total invocations
     i: u64,
-    /// total nanoseconds
-    nanos: u64,
-    /// baseline nanoseconds
+    /// total nanoseconds (unadjusted by baseline)
+    gross: u64,
+    /// baseline nanosecondsd
     base: u64,
-    /// mean (nanos / i)
-    mean: f64,
 
     // zig fmt: off
     // keeps on wanting to mash each print call on one long line
     /// calls std.debug.print and displays in a tabular format
     /// .header: print newline and then header lines first
     pub fn dprint(s: @This(), header: bool) void {
+        if(s.base > s.gross) {
+            std.debug.print("\n!! base={d} gross={d} !!\n", .{s.base, s.gross});
+            @panic("base took longer than computation? DCE issue hit or thread preempted. run again.");
+        }
+        const net: u64 = s.gross - s.base;
+        const mean: f64 = toDouble(net) / toDouble(s.i);
         if (header) {
             std.debug.print(
-                "\n{s: <10} | {s: >12} | {s: >13} | {s: >9} | {s: >6}\n",
-                .{ "name", "invocations", "time", "baseline", "ns/inv" });
+                "\n{s: <10} | {s: >12} | {s: >13} | {s: >11} | {s: >13} | {s: >6}\n",
+                .{ "name", "invocations", "gross ns", "base ns", "net ns", "ns/inv" });
             std.debug.print(
-                "{s:-<11}|{s:-<14}|{s:-<15}|{s:-<11}|{s:-<8}\n",
-                .{ "", "", "", "", ""});
+                "{s:-<11}|{s:-<14}|{s:-<15}|{s:-<13}|{s:-<15}|{s:-<8}\n",
+                .{ "", "", "", "", "", ""});
         }
-        std.debug.print("{s: <10} | {d: >12} | {d: >10} ns | {d: >6} ns | {d: >6.2}\n",
-                        .{ s.name, s.i, s.nanos, s.base, s.mean });
+        std.debug.print("{s: <10} | {d: >12} | {d: >13} | {d: >11} | {d: >13} | {d: >6.2}\n",
+                        .{ s.name, s.i, s.gross, s.base, net, mean });
     }
 };
 
@@ -74,15 +78,11 @@ pub noinline fn run_count_single(
         i -= 1;
     }
     const stop = now();
-
-    const delta = stop - start - base;
-    const mean = toDouble(delta) / toDouble(invokes);
-
+    const delta = stop - start;
     return Data{ .name = name,
                 .i = invokes,
-                .nanos = delta,
-                .base = base,
-                .mean = mean };
+                .gross = delta,
+                .base = base, };
 }
 
 fn set_bool(flag: *volatile bool, start: *volatile u64, nanos: u64) void {
@@ -124,20 +124,16 @@ pub noinline fn run_timed_single(
         invokes += 1;
     }
     const stop = now();
+    timer.join();
 
     // baseline calculation
     const base = baseline(opt, invokes);
-
-    const delta = stop - start - base;
-    const mean = toDouble(delta) / toDouble(invokes);
-
-    timer.join();
+    const delta = stop - start;
 
     return Data{ .name = name,
                 .i = invokes,
-                .nanos = delta,
-                .base = base,
-                .mean = mean };
+                .gross = delta,
+                .base = base, };
 }
 
 /// bench a function against differents arguments a fixed number of times through
@@ -177,13 +173,11 @@ pub noinline fn run_count_slice(
     const stop = now();
 
     const invokes = len * passes;
-    const delta = stop - start - base;
-    const mean = toDouble(delta) / toDouble(invokes);
+    const delta = stop - start;
     return Data{ .name = name,
                 .i = invokes,
-                .nanos = delta,
-                .base = base,
-                .mean = mean };
+                .gross = delta,
+                .base = base, };
 }
 
 pub noinline fn run_timed_slice(
@@ -219,20 +213,16 @@ pub noinline fn run_timed_slice(
         }
     }
     const stop = now();
+    timer.join();
 
     // baseline calculation
     const base = baseline(opt, invokes);
-
-    const delta = stop - start - base;
-    const mean = toDouble(delta) / toDouble(invokes);
-
-    timer.join();
+    const delta = stop - start;
 
     return Data{ .name = name,
                 .i = invokes,
-                .nanos = delta,
-                .base = base,
-                .mean = mean };
+                .gross = delta,
+                .base = base, };
 }
 
 /// to prevent the compiler from optimizing a result away even in ReleaseFast.
@@ -357,10 +347,10 @@ test "count slice" {
     var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
     var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
 
-    run_count_slice(.None, "stester32", 10000, tester32, &args32).dprint(true);
-    run_count_slice(.None, "stester64", 10000, tester64, &args64).dprint(false);
-    run_count_slice(.None, "stester32m", 10000, tester32m, &args32).dprint(false);
-    run_count_slice(.None, "stester64m", 10000, tester64m, &args64).dprint(false);
+    run_count_slice(.Baseline, "stester32", 10000, tester32, &args32).dprint(true);
+    run_count_slice(.Baseline, "stester64", 10000, tester64, &args64).dprint(false);
+    run_count_slice(.Baseline, "stester32m", 10000, tester32m, &args32).dprint(false);
+    run_count_slice(.Baseline, "stester64m", 10000, tester64m, &args64).dprint(false);
 }
 
 test "timed single" {
@@ -369,10 +359,10 @@ test "timed single" {
     const args32: arg_type32 = .{ 4.0, 9.0 };
     const args64: arg_type64 = .{ 4.0, 9.0 };
 
-    run_timed_single(.None, "tester32", 100, tester32, args32).dprint(true);
-    run_timed_single(.None, "tester64", 100, tester64, args64).dprint(false);
-    run_timed_single(.None, "tester32m", 100, tester32m, args32).dprint(false);
-    run_timed_single(.None, "tester64m", 100, tester64m, args64).dprint(false);
+    run_timed_single(.Baseline, "tester32", 100, tester32, args32).dprint(true);
+    run_timed_single(.Baseline, "tester64", 100, tester64, args64).dprint(false);
+    run_timed_single(.Baseline, "tester32m", 100, tester32m, args32).dprint(false);
+    run_timed_single(.Baseline, "tester64m", 100, tester64m, args64).dprint(false);
 }
 
 test "timed slice" {
@@ -381,10 +371,10 @@ test "timed slice" {
     var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
     var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
 
-    run_timed_slice(.None, "stester32", 100, tester32, &args32).dprint(true);
-    run_timed_slice(.None, "stester64", 100, tester64, &args64).dprint(false);
-    run_timed_slice(.None, "stester32m", 100, tester32m, &args32).dprint(false);
-    run_timed_slice(.None, "stester64m", 100, tester64m, &args64).dprint(false);
+    run_timed_slice(.Baseline, "stester32", 100, tester32, &args32).dprint(true);
+    run_timed_slice(.Baseline, "stester64", 100, tester64, &args64).dprint(false);
+    run_timed_slice(.Baseline, "stester32m", 100, tester32m, &args32).dprint(false);
+    run_timed_slice(.Baseline, "stester64m", 100, tester64m, &args64).dprint(false);
 }
 
 test "void return" {
