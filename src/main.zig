@@ -1,5 +1,17 @@
 const std = @import("std");
 
+const Options = enum(u32) {
+    None = 0x00,
+    /// still experimental
+    Baseline = 0x01,
+
+    pub fn has(s: @This(), v: Options) bool {
+        const sint = @intFromEnum(s);
+        const vint = @intFromEnum(v);
+        return sint & vint == vint;
+    }
+};
+
 pub const Data = struct {
     /// name for display purposes
     name: []const u8,
@@ -7,6 +19,8 @@ pub const Data = struct {
     i: u64,
     /// total nanoseconds
     nanos: u64,
+    /// baseline nanoseconds
+    base: u64,
     /// mean (nanos / i)
     mean: f64,
 
@@ -16,13 +30,15 @@ pub const Data = struct {
     /// .header: print newline and then header lines first
     pub fn dprint(s: @This(), header: bool) void {
         if (header) {
-            std.debug.print("\n{s: <10} | {s: >12} | {s: >13} | {s: >6}\n",
-                            .{ "name", "invocations", "nanos", "ns/inv" });
-            std.debug.print("{s:-<11}|{s:->14}|{s:->15}|{s:->8}\n",
-                            .{ "-", "-", "-", "-" });
+            std.debug.print(
+                "\n{s: <10} | {s: >12} | {s: >13} | {s: >9} | {s: >6}\n",
+                .{ "name", "invocations", "time", "baseline", "ns/inv" });
+            std.debug.print(
+                "{s:-<11}|{s:-<14}|{s:-<15}|{s:-<11}|{s:-<8}\n",
+                .{ "", "", "", "", ""});
         }
-        std.debug.print("{s: <10} | {d: >12} | {d: >10} ns | {d: >6.2}\n",
-                        .{ s.name, s.i, s.nanos, s.mean });
+        std.debug.print("{s: <10} | {d: >12} | {d: >10} ns | {d: >6} ns | {d: >6.2}\n",
+                        .{ s.name, s.i, s.nanos, s.base, s.mean });
     }
 };
 
@@ -31,7 +47,8 @@ pub const Data = struct {
 /// .invokes: number of times to execute
 /// .func: the function to call
 /// .args: a tuple of the arguments
-pub noinline fn run_single(name: []const u8,
+pub noinline fn run_single(comptime opt: Options,
+                           name: []const u8,
                            invokes: u64,
                            func: anytype,
                            arg: anytype) Data {
@@ -46,18 +63,26 @@ pub noinline fn run_single(name: []const u8,
     var ret: ret_type = undefined;
     const pvret: *volatile ret_type = &ret;
 
+    // baseline calculation
+    const base = baseline(opt, invokes);
+
+    // actual run
     var i = invokes;
-    const start: u64 = now();
+    const start = now();
     while (i != 0) {
         pvret.* = @call(.never_inline, func, vvarg);
         i -= 1;
     }
     const stop = now();
 
-    const delta = stop - start;
+    const delta = stop - start - base;
     const mean = toDouble(delta) / toDouble(invokes);
 
-    return Data{ .name = name, .i = invokes, .nanos = delta, .mean = mean };
+    return Data{ .name = name,
+                .i = invokes,
+                .nanos = delta,
+                .base = base,
+                .mean = mean };
 }
 
 /// bench a function against differents arguments a fixed number of times through
@@ -67,7 +92,7 @@ pub noinline fn run_single(name: []const u8,
 /// .passes: number of times to loop over the arguments
 /// .func: the function to call
 /// .args: a slice of tuples of the arguments
-pub noinline fn run_slice(name: []const u8, passes: u64, comptime func: anytype, args: anytype) Data {
+pub noinline fn run_slice(comptime opt:Options, name: []const u8, passes: u64, comptime func: anytype, args: anytype) Data {
     const args_type = @TypeOf(args[0]);
     const aargs: [*]volatile args_type = @ptrCast(args.ptr);
     var len = args.len;
@@ -79,8 +104,12 @@ pub noinline fn run_slice(name: []const u8, passes: u64, comptime func: anytype,
     var ret: ret_type = undefined;
     const pvret: *volatile ret_type = &ret;
 
+    // baseline
+    const base = baseline(opt, passes * len);
+
+    // actual run
     var p = passes;
-    const start: u64 = now();
+    const start = now();
     while (p != 0) {
         for (0..len) |i| {
             pvret.* = @call(.never_inline, func, aargs[i]);
@@ -88,10 +117,15 @@ pub noinline fn run_slice(name: []const u8, passes: u64, comptime func: anytype,
         p -= 1;
     }
     const stop = now();
+
     const invokes = len * passes;
-    const delta = stop - start;
+    const delta = stop - start - base;
     const mean = toDouble(delta) / toDouble(invokes);
-    return Data{ .name = name, .i = invokes, .nanos = delta, .mean = mean };
+    return Data{ .name = name,
+                .i = invokes,
+                .nanos = delta,
+                .base = base,
+                .mean = mean };
 }
 
 /// to prevent the compiler from optimizing a result away even in ReleaseFast.
@@ -133,6 +167,31 @@ inline fn toDouble(i: anytype) f64 {
     return @as(f64, @floatFromInt(i));
 }
 
+noinline fn baseline(comptime opt: Options, x: u64) u64 {
+    if(!opt.has(.Baseline)) {
+        return 0;
+    }
+
+    var bret = x;
+    const pvbret: *volatile u64 = &bret;
+
+    var i = x;
+    const start: u64 = now();
+    while (i != 0) {
+        pvbret.* = @call(.never_inline, nothing, .{i});
+        i -= 1;
+    }
+    const stop = now();
+    if(stop < start) {
+        @panic("baseline clock went backwards");
+    }
+    return stop - start;
+}
+
+noinline fn nothing(x:anytype) @TypeOf(x) {
+    return x;
+}
+
 // --- --- TESTING --- ---
 
 pub fn tester64(x: f64, y: f64) f64 {
@@ -151,26 +210,37 @@ pub fn tester32m(x: f32, y: f32) f32 {
     return std.math.sqrt(x) + std.math.sqrt(y);
 }
 
-test "single 10000 invokes" {
-    const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
-    const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
-    var args32: arg_type32 = .{ 4.0, 9.0 };
-    var args64: arg_type64 = .{ 4.0, 9.0 };
-
-    run_single("tester32", 10000, tester32, args32).dprint(true);
-    run_single("tester64", 10000, tester64, args64).dprint(false);
-    run_single("tester32m", 10000, tester32m, args32).dprint(false);
-    run_single("tester64m", 10000, tester64m, args64).dprint(false);
+pub fn testervoid(x: u64) void {
+    blackhole(x);
 }
 
-test "slice 1000 " {
+test "single" {
+    const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
+    const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
+    const args32: arg_type32 = .{ 4.0, 9.0 };
+    const args64: arg_type64 = .{ 4.0, 9.0 };
+
+    run_single(.None, "tester32", 10000, tester32, args32).dprint(true);
+    run_single(.None, "tester64", 10000, tester64, args64).dprint(false);
+    run_single(.None, "tester32m", 10000, tester32m, args32).dprint(false);
+    run_single(.None, "tester64m", 10000, tester64m, args64).dprint(false);
+}
+
+test "slice" {
     const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
     const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
     var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
     var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
 
-    run_slice("stester32", 10000, tester32, &args32).dprint(true);
-    run_slice("stester64", 10000, tester64, &args64).dprint(false);
-    run_slice("stester32m", 10000, tester32m, &args32).dprint(false);
-    run_slice("stester64m", 10000, tester64m, &args64).dprint(false);
+    run_slice(.None, "stester32", 10000, tester32, &args32).dprint(true);
+    run_slice(.None, "stester64", 10000, tester64, &args64).dprint(false);
+    run_slice(.None, "stester32m", 10000, tester32m, &args32).dprint(false);
+    run_slice(.None, "stester64m", 10000, tester64m, &args64).dprint(false);
+}
+
+test "void return" {
+    const arg_type = std.meta.Tuple(&.{u64});
+    var arg = [_]arg_type{ .{now()}, .{now()}, .{now()} };
+    run_single(.None, "void", 1000000, testervoid, .{now()}).dprint(true);
+    run_slice(.None, "svoid",  1000000, testervoid, &arg).dprint(false);
 }

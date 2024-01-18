@@ -27,7 +27,7 @@ Current only supports one execution style of fixed number
 of invocations. Planning to add more.
 
 * TODO always more
-- [ ] find empty run baseline
+- [X] find empty run baseline
 - [ ] per fix time interval
 - [ ] max timed runs
 - [ ] other threads to do the timing calls
