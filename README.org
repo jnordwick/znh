@@ -26,14 +26,15 @@ just adds too much noise.
 Current only supports one execution style of fixed number
 of invocations. Planning to add more.
 
-* TODO
-[ ] per fixed time
-[ ] max timed runs
-[ ] other threads to do the timing calls
-[ ] better interface
-[ ] warmup
-[ ] cache flushing (opposide of warmup)
-[ ] better reporting
-[ ] void returning functions
-[ ] functions with no arguments
-[ ] steal more JMH ideas
+* TODO always more
+- [ ] find empty run baseline
+- [ ] per fix time interval
+- [ ] max timed runs
+- [ ] other threads to do the timing calls
+- [ ] better interface
+- [ ] warmup
+- [ ] cache flushing (opposide of warmup)
+- [ ] better reporting
+- [ ] void returning functions
+- [ ] functions with no arguments
+- [ ] steal more JMH ideas
