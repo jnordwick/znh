@@ -1,0 +1,39 @@
+* Zig Nano-benchmarking Harness
+
+#+BEGIN_QUOTE
+Everything should be made as simple as possible,
+but not any simpler ---Albert Einstein
+#+END_QUOTE
+
+This definitely breaks the 'but not any simpler" part.
+(No the benchmarks arent nano scale, just the library.)
+
+Uses volatile reads/write to blackhole data and try to
+make sure all reads of arguments isn't elided.
+
+Uses clock_gettime() call using MONOTONIC_RAW to get
+a nano second count. This should be one fo the fastest
+reliable ways. If can be guaranteed a non-broken TSC
+(looking at you AMD), RDTSCP+FENCE is a possibility for
+tighter timings.
+
+Only checks times at start and stop of workload, not
+on every invocation. While this does include the looping
+inside the call there are plans to try to get a baseline
+and deduct it. Doing the timing calls on every invocation
+just adds too much noise.
+
+Current only supports one execution style of fixed number
+of invocations. Planning to add more.
+
+* TODO
+[ ] per fixed time
+[ ] max timed runs
+[ ] other threads to do the timing calls
+[ ] better interface
+[ ] warmup
+[ ] cache flushing (opposide of warmup)
+[ ] better reporting
+[ ] void returning functions
+[ ] functions with no arguments
+[ ] steal more JMH ideas
