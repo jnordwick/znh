@@ -5,26 +5,29 @@ Everything should be made as simple as possible,
 but not any simpler ---Albert Einstein
 #+END_QUOTE
 
-This definitely breaks the 'but not any simpler" part.
-(No the benchmarks arent nano scale, just the library.)
+This definitely breaks the 'but not any simpler" part. (No the benchmarks arent
+nano scale, just the library.)
 
-Uses volatile reads/write to blackhole data and try to
-make sure all reads of arguments isn't elided.
+Uses volatile reads/write to blackhole data and try to make sure all reads of
+arguments isn't elided.
 
-Uses clock_gettime() call using MONOTONIC_RAW to get
-a nano second count. This should be one fo the fastest
-reliable ways. If can be guaranteed a non-broken TSC
-(looking at you AMD), RDTSCP+FENCE is a possibility for
-tighter timings.
+Uses clock_gettime() call using MONOTONIC_RAW to get a nano second count. This
+should be one fo the fastest reliable ways. If can be guaranteed a non-broken
+TSC (looking at you AMD), RDTSCP+FENCE is a possibility for tighter timings.
 
-Only checks times at start and stop of workload, not
-on every invocation. While this does include the looping
-inside the call there are plans to try to get a baseline
-and deduct it. Doing the timing calls on every invocation
-just adds too much noise.
+Only checks times at start and stop of workload, not on every invocation. While
+this does include the looping inside the call there are plans to try to get a
+baseline and deduct it. Doing the timing calls on every invocation just adds too
+much noise.
 
-Current only supports one execution style of fixed number
-of invocations. Planning to add more.
+Currently has two timing modes: by count and by time. Either give it an
+invocation count to run to or a millisecond value to run to. The timing is done
+in a separate thread to not interfere with the running of the benched function.
+
+And each of those has two call modes: since value over and over again or give an
+array of values and it will make a fixed number of passes or keep doing full
+passes until the timer expires.
+
 
 * TODO always more
 - [X] find empty run baseline
@@ -36,7 +39,7 @@ of invocations. Planning to add more.
 - [ ] cache flushing (opposide of warmup)
 - [ ] better reporting
 - [X] void returning functions
-- [ ] functions with no arguments
+- [X] functions with no arguments
 - [ ] steal more JMH ideas
 
 * NOTES
