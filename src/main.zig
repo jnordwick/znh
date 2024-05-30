@@ -44,14 +44,12 @@ pub noinline fn run_count_cross(
 ) !DataSet {
     const Ftype = @typeInfo(@TypeOf(funcs)).Array.child;
     const farray: [funcs.len]Ftype = funcs;
-    var name_buf: [1024]u8 = undefined;
 
     var dataset = DataSet.init(alloc orelse page_alloc);
     inline for (0..farray.len) |fi| {
         const fname = get_fname(farray[fi]);
         inline for (0..args.len) |ai| {
-            const fullname = std.fmt.bufPrint(&name_buf, "{s} arg{d}", .{ fname, ai }) catch @panic("can't print");
-            const d: Data = run_count_single(opt, fullname, invokes, farray[fi], args[ai]);
+            const d: Data = run_count_single(opt, fname, ai, invokes, farray[fi], args[ai]);
             try dataset.add(d);
         }
     }
@@ -65,7 +63,8 @@ pub noinline fn run_count_cross(
 /// .args: a tuple of the arguments
 pub noinline fn run_count_single(
     comptime opt: Options,
-    name: []const u8,
+    fname: []const u8,
+    aname: anytype,
     invokes: u64,
     func: anytype,
     arg: anytype,
@@ -96,10 +95,10 @@ pub noinline fn run_count_single(
     }
     const stop = now();
     const delta = stop - start;
-    return Data.init(name, invokes, delta, base);
+    return Data.init(fname, aname, invokes, delta, base);
 }
 
-pub noinline fn run_timed_single(comptime opt: Options, name: []const u8, millis: u64, func: anytype, arg: anytype) Data {
+pub noinline fn run_timed_single(comptime opt: Options, fname: []const u8, aname: anytype, millis: u64, func: anytype, arg: anytype) Data {
     var varg = arg;
     const pvarg: *volatile @TypeOf(varg) = &varg;
     const vvarg = pvarg.*;
@@ -133,7 +132,7 @@ pub noinline fn run_timed_single(comptime opt: Options, name: []const u8, millis
     const base = baseline(opt, invokes);
     const delta = stop - start;
 
-    return Data.init(name, invokes, delta, base);
+    return Data.init(fname, aname, invokes, delta, base);
 }
 
 /// bench a function against differents arguments a fixed number of times through
@@ -145,7 +144,8 @@ pub noinline fn run_timed_single(comptime opt: Options, name: []const u8, millis
 /// .args: a slice of tuples of the arguments
 pub noinline fn run_count_slice(
     comptime opt: Options,
-    name: []const u8,
+    fname: []const u8,
+    aname: anytype,
     passes: u64,
     comptime func: anytype,
     args: anytype,
@@ -177,12 +177,13 @@ pub noinline fn run_count_slice(
 
     const invokes = len * passes;
     const delta = stop - start;
-    return Data.init(name, invokes, delta, base);
+    return Data.init(fname, aname, invokes, delta, base);
 }
 
 pub noinline fn run_timed_slice(
     comptime opt: Options,
-    name: []const u8,
+    fname: []const u8,
+    aname: anytype,
     millis: u64,
     comptime func: anytype,
     args: anytype,
@@ -222,7 +223,7 @@ pub noinline fn run_timed_slice(
     const base = baseline(opt, invokes);
     const delta = stop - start;
 
-    return Data.init(name, invokes, delta, base);
+    return Data.init(fname, aname, invokes, delta, base);
 }
 
 /// to prevent the compiler from optimizing a result away even in ReleaseFast.
@@ -297,7 +298,6 @@ fn set_bool(flag: *volatile bool, start: *volatile u64, nanos: u64) void {
     flag.* = true;
 }
 
-// --- --- TESTING --- ---
 noinline fn arg_slice(s: []u8, t: []u8) u64 {
     blackhole(s);
     blackhole(t);
@@ -374,10 +374,10 @@ test "count single" {
     const args64: arg_type64 = .{ 4.0, 9.0 };
 
     var ds = DataSet.init(null);
-    try ds.add(run_count_single(.None, "tester32", 10000, tester32, args32));
-    try ds.add(run_count_single(.None, "tester64", 10000, tester64, args64));
-    try ds.add(run_count_single(.None, "tester32m", 10000, tester32m, args32));
-    try ds.add(run_count_single(.None, "tester64m", 10000, tester64m, args64));
+    try ds.add(run_count_single(.None, "tester32", "(a32)", 10000, tester32, args32));
+    try ds.add(run_count_single(.None, "tester64", "(a64)", 10000, tester64, args64));
+    try ds.add(run_count_single(.None, "tester32m", "(a32)", 10000, tester32m, args32));
+    try ds.add(run_count_single(.None, "tester64m", "(a64)", 10000, tester64m, args64));
     try ds.write(twriter);
 }
 
@@ -399,10 +399,10 @@ test "count slice" {
     var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
 
     var ds = DataSet.init(null);
-    try ds.add(run_count_slice(.Baseline, "stester32", 10000, tester32, &args32));
-    try ds.add(run_count_slice(.Baseline, "stester64", 10000, tester64, &args64));
-    try ds.add(run_count_slice(.Baseline, "stester32m", 10000, tester32m, &args32));
-    try ds.add(run_count_slice(.None, "stester64m", 10000, tester64m, &args64));
+    try ds.add(run_count_slice(.Baseline, "stester32", "(a32)", 10000, tester32, &args32));
+    try ds.add(run_count_slice(.Baseline, "stester64", "(a64)", 10000, tester64, &args64));
+    try ds.add(run_count_slice(.Baseline, "stester32m", "(a32)", 10000, tester32m, &args32));
+    try ds.add(run_count_slice(.None, "stester64m", "(a64)", 10000, tester64m, &args64));
     try ds.write(twriter);
 }
 
@@ -413,10 +413,10 @@ test "timed single" {
     const args64: arg_type64 = .{ 4.0, 9.0 };
 
     var ds = DataSet.init(null);
-    try ds.add(run_timed_single(.Baseline, "tester32", 100, tester32, args32));
-    try ds.add(run_timed_single(.Baseline, "tester64", 100, tester64, args64));
-    try ds.add(run_timed_single(.Baseline, "tester32m", 100, tester32m, args32));
-    try ds.add(run_timed_single(.Baseline, "tester64m", 100, tester64m, args64));
+    try ds.add(run_timed_single(.Baseline, "tester32", 32, 100, tester32, args32));
+    try ds.add(run_timed_single(.Baseline, "tester64", 64, 100, tester64, args64));
+    try ds.add(run_timed_single(.Baseline, "tester32m", 32, 100, tester32m, args32));
+    try ds.add(run_timed_single(.Baseline, "tester64m", 64, 100, tester64m, args64));
     try ds.write(twriter);
 }
 
@@ -427,10 +427,10 @@ test "timed slice" {
     var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
 
     var ds = DataSet.init(null);
-    try ds.add(run_timed_slice(.Baseline, "stester32", 100, tester32, &args32));
-    try ds.add(run_timed_slice(.Baseline, "stester64", 100, tester64, &args64));
-    try ds.add(run_timed_slice(.Baseline, "stester32m", 100, tester32m, &args32));
-    try ds.add(run_timed_slice(.Baseline, "stester64m", 100, tester64m, &args64));
+    try ds.add(run_timed_slice(.Baseline, "stester32", 32, 100, tester32, &args32));
+    try ds.add(run_timed_slice(.Baseline, "stester64", 64, 100, tester64, &args64));
+    try ds.add(run_timed_slice(.Baseline, "stester32m", 32, 100, tester32m, &args32));
+    try ds.add(run_timed_slice(.Baseline, "stester64m", 64, 100, tester64m, &args64));
     try ds.write(twriter);
 }
 
@@ -439,8 +439,8 @@ test "void return" {
     var arg = [_]arg_type{ .{now()}, .{now()}, .{now()} };
 
     var ds = DataSet.init(null);
-    try ds.add(run_count_single(.None, "void", 1000000, testervoid, .{now()}));
-    try ds.add(run_count_slice(.None, "svoid", 1000000, testervoid, &arg));
+    try ds.add(run_count_single(.None, "void", "(tuple)", 1000000, testervoid, .{now()}));
+    try ds.add(run_count_slice(.None, "svoid", "(ptr)", 1000000, testervoid, &arg));
     try ds.write(twriter);
 }
 
