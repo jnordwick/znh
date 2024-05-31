@@ -9,6 +9,8 @@ const page_alloc = std.heap.page_allocator;
 const DataSet = _ds.DataSet;
 const Data = _ds.Data;
 
+var g_alloc = std.heap.GeneralPurposeAllocator(.{});
+
 fn WhoAreYou(x: anytype) type {
     return struct {
         const t = x;
@@ -21,23 +23,14 @@ pub fn get_fname(comptime func: anytype) []const u8 {
     return WhoAreYou(func).who;
 }
 
-const Options = enum(u32) {
-    None = 0x00,
-    /// still experimental
-    Baseline = 0x01,
-
-    pub fn has(s: @This(), v: Options) bool {
-        const sint = @intFromEnum(s);
-        const vint = @intFromEnum(v);
-        return sint & vint == vint;
-    }
+const Options = packed struct {
+    baseline: bool = false,
+    arg_over: bool = true,
+    arg_wrap: bool = false,
 };
 
-const nums: []const []const u8 = .{ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
-
-pub noinline fn run_count_cross(
-    comptime opt: Options,
-    alloc: ?Allocator,
+pub noinline fn count_cross(
+    opt: Options,
     invokes: usize,
     comptime funcs: anytype,
     comptime args: anytype,
@@ -45,60 +38,83 @@ pub noinline fn run_count_cross(
     const Ftype = @typeInfo(@TypeOf(funcs)).Array.child;
     const farray: [funcs.len]Ftype = funcs;
 
-    var dataset = DataSet.init(alloc orelse page_alloc);
+    var dataset = DataSet.init(g_alloc);
     inline for (0..farray.len) |fi| {
         const fname = get_fname(farray[fi]);
         inline for (0..args.len) |ai| {
-            const d: Data = run_count_single(opt, fname, ai, invokes, farray[fi], args[ai]);
+            const d: Data = count_single(opt, fname, ai, invokes, farray[fi], args[ai]);
             try dataset.add(d);
         }
     }
     return dataset;
 }
 
-/// bench a function with a single arguments a set number of times
-/// .name: purely for documentation purposes
-/// .invokes: number of times to execute
-/// .func: the function to call
-/// .args: a tuple of the arguments
-pub noinline fn run_count_single(
-    comptime opt: Options,
+pub noinline fn count_single(
+    /// options, passed in from `cross_count`
+    comptime opts: Options,
+    /// the function name use for output
     fname: []const u8,
+    /// the argument name: either a string or
     aname: anytype,
-    invokes: u64,
+    passes: u64,
     func: anytype,
     arg: anytype,
 ) Data {
-    const ti = @typeInfo(@TypeOf(arg));
-    const tuple_arg = switch (ti) {
-        .Struct => if (ti.Struct.is_tuple) arg else .{arg},
-        else => .{arg},
-    };
-    const pvarg: *volatile @TypeOf(tuple_arg) = @ptrCast(@constCast(&tuple_arg));
+    const pvarg: *volatile @TypeOf(arg) = @ptrCast(@constCast(&arg));
 
-    // std.mem.doNotOptimize seems to get optimized away in non-Debug builds
-    // and the never_inline function is then elided
+    // std.mem.doNotOptimize doesnt' help protect against aggressive constant
+    // folding and that becomes a much bigger problem with zig's compilation style
     const func_ti = @typeInfo(@TypeOf(func));
     const ret_type = func_ti.Fn.return_type.?;
     var ret: ret_type = undefined;
     const pvret: *volatile ret_type = &ret;
 
     // baseline calculation
-    const base = baseline(opt, invokes);
+    const invokes = passes * if (comptime opts.args_over) pvarg.len else 1;
+    const base = baseline(opts, invokes);
 
     // actual run
-    var i = invokes;
+    var p = passes;
     const start = now();
-    while (i != 0) {
-        pvret.* = @call(.never_inline, func, pvarg.*);
-        i -= 1;
+    while (p != 0) {
+        if (comptime opts.args_over) {
+            for (0..pvarg.len) |i| {
+                const a = if (opts.wrap) .{pvarg[i]} else pvarg[i];
+                pvret.* = @call(.never_inline, func, a);
+            }
+        } else {
+            const a = if (opts.wrap) .{pvarg.*} else pvarg.*;
+            pvret.* = @call(.never_inline, func, a);
+        }
+        p -= 1;
     }
     const stop = now();
+
     const delta = stop - start;
     return Data.init(fname, aname, invokes, delta, base);
 }
 
-pub noinline fn run_timed_single(comptime opt: Options, fname: []const u8, aname: anytype, millis: u64, func: anytype, arg: anytype) Data {
+pub noinline fn time_cross(
+    comptime opt: Options,
+    millis: usize,
+    comptime funcs: anytype,
+    comptime args: anytype,
+) !DataSet {
+    const Ftype = @typeInfo(@TypeOf(funcs)).Array.child;
+    const farray: [funcs.len]Ftype = funcs;
+
+    var dataset = DataSet.init(g_alloc);
+    inline for (0..farray.len) |fi| {
+        const fname = get_fname(farray[fi]);
+        inline for (0..args.len) |ai| {
+            const d: Data = time_single(opt, fname, ai, millis, farray[fi], args[ai]);
+            try dataset.add(d);
+        }
+    }
+    return dataset;
+}
+
+pub noinline fn time_single(comptime opt: Options, fname: []const u8, aname: anytype, millis: u64, func: anytype, arg: anytype) Data {
     var varg = arg;
     const pvarg: *volatile @TypeOf(varg) = &varg;
     const vvarg = pvarg.*;
@@ -132,51 +148,6 @@ pub noinline fn run_timed_single(comptime opt: Options, fname: []const u8, aname
     const base = baseline(opt, invokes);
     const delta = stop - start;
 
-    return Data.init(fname, aname, invokes, delta, base);
-}
-
-/// bench a function against differents arguments a fixed number of times through
-/// the entire set. This is useful for functioins who's time can vary for different
-/// arguments. Also good for giving the same set of values to diffrent functions.
-/// .name: purely for documentation purposes
-/// .passes: number of times to loop over the arguments
-/// .func: the function to call
-/// .args: a slice of tuples of the arguments
-pub noinline fn run_count_slice(
-    comptime opt: Options,
-    fname: []const u8,
-    aname: anytype,
-    passes: u64,
-    comptime func: anytype,
-    args: anytype,
-) Data {
-    const args_type = @TypeOf(args[0]);
-    const aargs: [*]volatile args_type = @ptrCast(args.ptr);
-    const len = args.len;
-
-    // std.mem.doNotOptimize seems to get optimized away in non-Debug builds
-    // and the never_inline function is then elided
-    const func_ti = @typeInfo(@TypeOf(func));
-    const ret_type = func_ti.Fn.return_type.?;
-    var ret: ret_type = undefined;
-    const pvret: *volatile ret_type = &ret;
-
-    // baseline
-    const base = baseline(opt, passes * len);
-
-    // actual run
-    var p = passes;
-    const start = now();
-    while (p != 0) {
-        for (0..len) |i| {
-            pvret.* = @call(.never_inline, func, aargs[i]);
-        }
-        p -= 1;
-    }
-    const stop = now();
-
-    const invokes = len * passes;
-    const delta = stop - start;
     return Data.init(fname, aname, invokes, delta, base);
 }
 
@@ -229,9 +200,9 @@ pub noinline fn run_timed_slice(
 /// to prevent the compiler from optimizing a result away even in ReleaseFast.
 /// godbolt confirms Release modes DCE out _ and std.mem.doNotOptimize.
 pub inline fn blackhole(x: anytype) void {
-    const ret_type = @TypeOf(x);
-    var vret: ret_type = undefined;
-    const pvret: *volatile ret_type = &vret;
+    const Ret = @TypeOf(x);
+    var vret: Ret = undefined;
+    const pvret: *volatile Ret = &vret;
     pvret.* = x;
 }
 
@@ -239,9 +210,9 @@ pub inline fn blackhole(x: anytype) void {
 /// Sometimes it can be a little easier to use or more efficient if the commpiler
 /// insists on recreating the volatile area.
 /// .x: A result value to send into a blackhole
-/// .y: a pointer to an already existing location to use
-pub inline fn blackloc(x: anytype, y: *@TypeOf(x)) void {
-    @as(*volatile @TypeOf(x), @ptrCast(y)).* = x;
+/// .loc: a pointer to an already existing location to use
+pub inline fn blackloc(x: anytype, loc: *@TypeOf(x)) void {
+    @as(*volatile @TypeOf(x), @ptrCast(loc)).* = x;
 }
 
 /// To prevent the compiler from optimizing out a read from a location. Casts to
@@ -382,7 +353,7 @@ test "count single" {
 }
 
 test "cross count single" {
-    const ds = try run_count_cross(
+    const ds = try cross_count_single(
         .None,
         null,
         10000,
