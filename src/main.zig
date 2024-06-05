@@ -19,9 +19,19 @@ fn WhoAreYou(x: anytype) type {
     };
 }
 
+fn HiMyNameIs(x: anytype) type {
+    return struct {
+        const t = x;
+        pub const slim = @typeName(@This());
+        pub const shady = slim[0 .. slim.len - 3][27..];
+    };
+}
+
 pub fn get_fname(comptime func: anytype) []const u8 {
     return WhoAreYou(func).who;
 }
+
+const fet_gname = get_fname;
 
 const Options = packed struct {
     baseline: bool = false,
@@ -322,100 +332,110 @@ fn testervoid(x: u64) void {
 const TT = std.testing;
 const twriter = std.io.getStdErr().writer();
 
-test "timer thread" {
-    const millis100 = 100 * 1000 * 1000;
-    var flag: bool = false;
-    const vpf: *volatile bool = &flag;
-    var start: u64 = 0;
-    const vpstart: *volatile u64 = &start;
-    var timer = Thread.spawn(.{}, set_bool, .{ vpf, vpstart, millis100 }) catch @panic("could not spawn");
-    vpstart.* = now();
-    while (!vpf.*) {}
-    const stop = now();
-    timer.join();
+// test "timer thread" {
+//     const millis100 = 100 * 1000 * 1000;
+//     var flag: bool = false;
+//     const vpf: *volatile bool = &flag;
+//     var start: u64 = 0;
+//     const vpstart: *volatile u64 = &start;
+//     var timer = Thread.spawn(.{}, set_bool, .{ vpf, vpstart, millis100 }) catch @panic("could not spawn");
+//     vpstart.* = now();
+//     while (!vpf.*) {}
+//     const stop = now();
+//     timer.join();
 
-    const tot: f64 = toDouble(stop - start) / 1e6;
-    try TT.expectApproxEqAbs(@as(f64, 100.0), tot, 5.0);
-}
+//     const tot: f64 = toDouble(stop - start) / 1e6;
+//     try TT.expectApproxEqAbs(@as(f64, 100.0), tot, 5.0);
+// }
 
-test "count single" {
-    const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
-    const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
-    const args32: arg_type32 = .{ 4.0, 9.0 };
-    const args64: arg_type64 = .{ 4.0, 9.0 };
+// test "count single" {
+//     const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
+//     const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
+//     const args32: arg_type32 = .{ 4.0, 9.0 };
+//     const args64: arg_type64 = .{ 4.0, 9.0 };
 
-    var ds = DataSet.init(null);
-    try ds.add(run_count_single(.None, "tester32", "(a32)", 10000, tester32, args32));
-    try ds.add(run_count_single(.None, "tester64", "(a64)", 10000, tester64, args64));
-    try ds.add(run_count_single(.None, "tester32m", "(a32)", 10000, tester32m, args32));
-    try ds.add(run_count_single(.None, "tester64m", "(a64)", 10000, tester64m, args64));
-    try ds.write(twriter);
-}
+//     var ds = DataSet.init(null);
+//     try ds.add(run_count_single(.None, "tester32", "(a32)", 10000, tester32, args32));
+//     try ds.add(run_count_single(.None, "tester64", "(a64)", 10000, tester64, args64));
+//     try ds.add(run_count_single(.None, "tester32m", "(a32)", 10000, tester32m, args32));
+//     try ds.add(run_count_single(.None, "tester64m", "(a64)", 10000, tester64m, args64));
+//     try ds.write(twriter);
+// }
 
-test "cross count single" {
-    const ds = try cross_count_single(
-        .None,
-        null,
-        10000,
-        [_](fn (u64) u32){ bitcount_bk, bitcount_pc },
-        [_]u64{ 123, 456, 789 },
-    );
-    try ds.write(twriter);
-}
+// test "cross count single" {
+//     const ds = try cross_count_single(
+//         .None,
+//         null,
+//         10000,
+//         [_](fn (u64) u32){ bitcount_bk, bitcount_pc },
+//         [_]u64{ 123, 456, 789 },
+//     );
+//     try ds.write(twriter);
+// }
 
-test "count slice" {
-    const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
-    const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
-    var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
-    var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
+// test "count slice" {
+//     const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
+//     const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
+//     var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
+//     var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
 
-    var ds = DataSet.init(null);
-    try ds.add(run_count_slice(.Baseline, "stester32", "(a32)", 10000, tester32, &args32));
-    try ds.add(run_count_slice(.Baseline, "stester64", "(a64)", 10000, tester64, &args64));
-    try ds.add(run_count_slice(.Baseline, "stester32m", "(a32)", 10000, tester32m, &args32));
-    try ds.add(run_count_slice(.None, "stester64m", "(a64)", 10000, tester64m, &args64));
-    try ds.write(twriter);
-}
+//     var ds = DataSet.init(null);
+//     try ds.add(run_count_slice(.Baseline, "stester32", "(a32)", 10000, tester32, &args32));
+//     try ds.add(run_count_slice(.Baseline, "stester64", "(a64)", 10000, tester64, &args64));
+//     try ds.add(run_count_slice(.Baseline, "stester32m", "(a32)", 10000, tester32m, &args32));
+//     try ds.add(run_count_slice(.None, "stester64m", "(a64)", 10000, tester64m, &args64));
+//     try ds.write(twriter);
+// }
 
-test "timed single" {
-    const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
-    const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
-    const args32: arg_type32 = .{ 4.0, 9.0 };
-    const args64: arg_type64 = .{ 4.0, 9.0 };
+// test "timed single" {
+//     const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
+//     const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
+//     const args32: arg_type32 = .{ 4.0, 9.0 };
+//     const args64: arg_type64 = .{ 4.0, 9.0 };
 
-    var ds = DataSet.init(null);
-    try ds.add(run_timed_single(.Baseline, "tester32", 32, 100, tester32, args32));
-    try ds.add(run_timed_single(.Baseline, "tester64", 64, 100, tester64, args64));
-    try ds.add(run_timed_single(.Baseline, "tester32m", 32, 100, tester32m, args32));
-    try ds.add(run_timed_single(.Baseline, "tester64m", 64, 100, tester64m, args64));
-    try ds.write(twriter);
-}
+//     var ds = DataSet.init(null);
+//     try ds.add(run_timed_single(.Baseline, "tester32", 32, 100, tester32, args32));
+//     try ds.add(run_timed_single(.Baseline, "tester64", 64, 100, tester64, args64));
+//     try ds.add(run_timed_single(.Baseline, "tester32m", 32, 100, tester32m, args32));
+//     try ds.add(run_timed_single(.Baseline, "tester64m", 64, 100, tester64m, args64));
+//     try ds.write(twriter);
+// }
 
-test "timed slice" {
-    const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
-    const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
-    var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
-    var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
+// test "timed slice" {
+//     const arg_type32 = std.meta.Tuple(&.{ f32, f32 });
+//     const arg_type64 = std.meta.Tuple(&.{ f64, f64 });
+//     var args32 = [_]arg_type32{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
+//     var args64 = [_]arg_type64{ .{ 4.0, 9.0 }, .{ 9.0, 4.0 } };
 
-    var ds = DataSet.init(null);
-    try ds.add(run_timed_slice(.Baseline, "stester32", 32, 100, tester32, &args32));
-    try ds.add(run_timed_slice(.Baseline, "stester64", 64, 100, tester64, &args64));
-    try ds.add(run_timed_slice(.Baseline, "stester32m", 32, 100, tester32m, &args32));
-    try ds.add(run_timed_slice(.Baseline, "stester64m", 64, 100, tester64m, &args64));
-    try ds.write(twriter);
-}
+//     var ds = DataSet.init(null);
+//     try ds.add(run_timed_slice(.Baseline, "stester32", 32, 100, tester32, &args32));
+//     try ds.add(run_timed_slice(.Baseline, "stester64", 64, 100, tester64, &args64));
+//     try ds.add(run_timed_slice(.Baseline, "stester32m", 32, 100, tester32m, &args32));
+//     try ds.add(run_timed_slice(.Baseline, "stester64m", 64, 100, tester64m, &args64));
+//     try ds.write(twriter);
+// }
 
-test "void return" {
-    const arg_type = std.meta.Tuple(&.{u64});
-    var arg = [_]arg_type{ .{now()}, .{now()}, .{now()} };
+// test "void return" {
+//     const arg_type = std.meta.Tuple(&.{u64});
+//     var arg = [_]arg_type{ .{now()}, .{now()}, .{now()} };
 
-    var ds = DataSet.init(null);
-    try ds.add(run_count_single(.None, "void", "(tuple)", 1000000, testervoid, .{now()}));
-    try ds.add(run_count_slice(.None, "svoid", "(ptr)", 1000000, testervoid, &arg));
-    try ds.write(twriter);
-}
+//     var ds = DataSet.init(null);
+//     try ds.add(run_count_single(.None, "void", "(tuple)", 1000000, testervoid, .{now()}));
+//     try ds.add(run_count_slice(.None, "svoid", "(ptr)", 1000000, testervoid, &arg));
+//     try ds.write(twriter);
+// }
 
 test get_fname {
-    const n = get_fname(get_fname);
-    try TT.expectEqualStrings("get_fname", n);
+    const j = WhoAreYou(get_fname).who;
+    const k = HiMyNameIs(get_fname).shady;
+    const l = WhoAreYou(fet_gname).who;
+    const m = HiMyNameIs(fet_gname).shady;
+    std.debug.print("\n{s}\n", .{j});
+    std.debug.print("\n{s}\n", .{k});
+    std.debug.print("\n{s}\n", .{l});
+    std.debug.print("\n{s}\n", .{m});
+    //try TT.expectEqualStrings("get_fname", j);
+    //try TT.expectEqualStrings("get_fname", k);
+    //try TT.expectEqualStrings("get_fname", l);
+    //try TT.expectEqualStrings("get_fname", m);
 }

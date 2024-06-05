@@ -1,14 +1,11 @@
 .{
     .name = "znh",
     .version = "0.0.0",
-    .dependencies = .{
-        .example = .{
-            .url = "https://github.com/jnordwick/zig-string/archive/refs/tags/0.1.tar.gz",
-            //.hash = "...",
-        },
-    },
-
     .paths = .{
         "",
+    },
+
+    .dependencies = .{
+        .zig-string = .{ .path = "../zig-string"},
     },
 }
