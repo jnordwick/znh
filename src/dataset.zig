@@ -5,7 +5,7 @@ const math = std.math;
 const fmt = std.fmt;
 const Dir = std.fs.Dir;
 
-const ArrayList = @import("arraylist.zig").ArrayList;
+const ArrayList = @import("arraylist.zig").ArrayListEx;
 
 const Context = struct {};
 
@@ -289,14 +289,19 @@ pub const Data = struct {
     /// baseline nanosecondsd
     base: u64,
 
+    /// initialize from function name, argument name or number, number of invocations this
+    /// counts, total (gross) time, and baseline time (time to deduct from total time -
+    /// usually any looping and other overhead)
     pub fn init(fname: []const u8, aname: anytype, i: u64, gross: u64, base: u64) Data {
-        switch (@typeInfo(@TypeOf(aname))) {
-            .Int => return init_indexed(fname, aname, i, gross, base),
-            else => return init_named(fname, aname, i, gross, base),
-        }
-        unreachable;
+        return switch (@typeInfo(@TypeOf(aname))) {
+            .Int => init_indexed(fname, aname, i, gross, base),
+            else => init_named(fname, aname, i, gross, base),
+        };
     }
 
+    /// same as init, but assume an index number that it will convert to a string. this is
+    /// useful for complex or long argument lists where an index number is easier to read.
+    /// also useful if you are just being lazy
     pub fn init_indexed(fname: []const u8, aindex: u64, i: u64, gross: u64, base: u64) Data {
         var buf = [_]u8{0} ** 32;
         buf[0] = '(';
@@ -306,6 +311,7 @@ pub const Data = struct {
         return init_named(fname, aname, i, gross, base);
     }
 
+    /// same as init, but assumes a string for the argument name
     pub fn init_named(fname: []const u8, aname: []const u8, i: u64, gross: u64, base: u64) Data {
         var d: Data = undefined;
         @memset(&d.namebuf, 0);
@@ -319,22 +325,27 @@ pub const Data = struct {
         return d;
     }
 
+    /// return full name
     pub fn get_name(this: *const This) []const u8 {
         return this.namebuf[0 .. this.fname_len + this.aname_len];
     }
 
+    /// return the function name
     pub fn get_fname(this: *const This) []const u8 {
         return this.namebuf[0..this.fname_len];
     }
 
+    /// return the argument name or index number as a string
     pub fn get_aname(this: *const This) []const u8 {
         return this.namebuf[this.fname_len .. this.fname_len + this.aname_len];
     }
 
+    /// return net time taken (gross - base) in nanoseconds
     pub fn get_net(this: *const This) u64 {
         return this.gross - this.base;
     }
 
+    /// returns net time per invocation
     pub fn get_nsinv(this: *const This) f64 {
         const n: f128 = @floatFromInt(this.get_net());
         const i: f128 = @floatFromInt(this.i);
@@ -342,8 +353,7 @@ pub const Data = struct {
     }
 };
 
-// -- == === Testing === == --
-
+//  === TESTNG ===
 const TT = std.testing;
 const twriter = std.io.getStdErr().writer();
 
@@ -357,10 +367,10 @@ test {
     try ds.gnuplot("./ds-gnuplot");
 }
 
-//test {
-//    const d = Data.init_named("foo", "123", 123, 456, 10);
-//    const e = Data.init_indexed("bar", 456, 123, 456, 10);
-//
-//    try TT.expectEqualStrings("foo123", d.get_name());
-//    try TT.expectEqualStrings("bar(456)", e.get_name());
-//}
+test {
+    const d = Data.init_named("foo", "123", 123, 456, 10);
+    const e = Data.init_indexed("bar", 456, 123, 456, 10);
+
+    try TT.expectEqualStrings("foo123", d.get_name());
+    try TT.expectEqualStrings("bar(456)", e.get_name());
+}

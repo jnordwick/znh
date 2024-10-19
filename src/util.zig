@@ -10,6 +10,8 @@ pub fn copy(T: type, dst: [*]T, src: [*]const T, n: usize) void {
     @memcpy(dst, src[0..n]);
 }
 
+const dno = std.mem.doNotOptimizeAway;
+
 fn WhoAreYou(x: anytype) type {
     return struct {
         const t = x;
@@ -21,4 +23,3 @@ fn WhoAreYou(x: anytype) type {
 pub fn get_fname(comptime func: anytype) []const u8 {
     return WhoAreYou(func).who;
 }
-

@@ -6,6 +6,6 @@
     },
 
     .dependencies = .{
-        .zig-string = .{ .path = "../zig-string"},
+        .@"zig-string" = .{ .path = "../zig-string" },
     },
 }

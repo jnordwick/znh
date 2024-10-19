@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addImport("zig-string", zs.module("zig-string"));
     b.installArtifact(lib);
 
-    // run main - used for testing
+    // run main - used for runing
     const exe = b.addExecutable(.{
         .name = "znh",
         .root_source_file = b.path("src/main.zig"),
@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
 
     // test step
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/znh.zig"),
         .target = target,
         .optimize = optimize,
     });

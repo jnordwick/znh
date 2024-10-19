@@ -1,5 +1,8 @@
 * Zig Nano-benchmarking Harness
 
+UPDATE: I started to refactor and rewrite pieces to get ready to release
+so the repo might be in a little bit of a disarray for a could weeks. 10/19/24
+
 #+BEGIN_QUOTE
 Everything should be made as simple as possible,
 but not any simpler ---Albert Einstein

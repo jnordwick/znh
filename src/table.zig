@@ -1,47 +1,67 @@
 const std = @import("std");
 
-const arraylist = @import("arraylist.zig").ArrayList;
-const ArrayList = arraylist.ArrayList;
+//const arraylist = @import("arraylist.zig").ArrayList;
+//const ArrayList = arraylist.ArrayList;
 
 const zstring = @import("zig-string");
 const String = zstring.String;
 
+const Data = struct {
+    v: u64,
+
+    pub fn merge(this: *Data, other: *const Data) void {
+        this.x += other.x;
+    }
+};
+
 const Table = struct {
     const This = @This();
 
-    const Data = u64;
-    const Xlabel = String;
-    const Ylabel = String;
-
-    const Ymap = std.ArrayHashMap(String, usize, zstring.HashContext, 50);
-    const Xmap = std.ArrayHashMap(String, Ymap, zstring.HashContext, 50);
+    const StringSet = std.ArrayHashMap(String, void, String.HashContext, false);
 
     alloc: std.mem.Allocator,
-    x: Xmap,
-    y: Ymap,
-    d: ArrayList(Data),
+
+    xset: StringSet,
+    yset: StringSet,
+    data: ArrayList(ArrayList(Data)),
 
     pub fn init(comptime alloc: std.mem.Allocator) This {
         return .{
             .alloc = alloc,
-            .x = Xmap.init(alloc),
-            .y = ArrayList(Ylabel).init(alloc),
-            .d = ArrayList(Data).init(alloc),
+            .xset = StringSet.init(alloc),
+            .yset = StringSet.init(alloc),
+            .data = ArrayList(?Data).init(alloc),
         };
     }
 
-    pub fn add(this: *This, x: Xlabel, y: Ylabel, d: Data) !bool {
-        const hasx = this.xlabels.contains(x, String.eql);
-        const hasy = this.xlabels.contains(y, String.eql);
-        try this.dates.append(d);
-        errdefer _ = this.dates.pop();
-
-        if (!hasx)
-            try this.xlabels.append(x);
-        errdefer {
-            if (!hasx) this.xlabels.pop();
+    pub fn add(this: *This, x: String, y: String, d: Data) !void {
+        if (!this.xset.contains(x.String.eql)) {
+            try this.xset.append(x);
+            const row = ArrayList.init(this.alloc, this.yset.length());
+            try row.append_fill(this.alloc, .{null}, this.yset.length());
+        }
+        if (!this.yset.contains(y, String.eql)) {
+            try this.yset.append(y);
+            for (this.data.items()) |e| {
+                try e.append(this.alloc, null);
+            }
         }
 
-        if (!hasy) try this.ylabels.append(y);
+        const cell = this.data.ref(x).items().ref(y);
+        if (cell == null) cell.* = d else cell.merge(d);
+    }
+
+    pub fn ref(this: *This, x: String, y: String) ?*Data {
+        const r = this.xset.index_of_fn(x, String.eql) orelse return null;
+        const c = this.yset.index_of_fn(y, String.eql) orelse return null;
+        return this.data.ref(r).ref(c);
     }
 };
+
+const TT = std.testing;
+
+test "init" {
+    const al = TT.allocator;
+    var t = Table.init(al);
+    try t.addS(String.init_copy(al, "aaa"), String.init_copy(al, "bbb"), .{ .x = 1 });
+}
